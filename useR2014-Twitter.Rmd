@@ -1,0 +1,214 @@
+UseR!2014 (as seen on Twitter)
+----
+Some stats on the recently completed annual UseR! conference as represented by
+nearly 2K tweets with tag #user2014
+
+July 6th, 2014 -  Tweet [aj2z](https://twitter.com/aj2z) for source.
+
+------
+
+```{r, cache=TRUE, echo=FALSE, message=FALSE}
+# Let's try doing this exercise with the new R Markdown -> RPubs Workflow
+
+# Get some base packages
+library("twitteR")
+library("Unicode")
+
+# TW Oauth & Data Pull
+load("~/tw_creds.Rdata") # See twitteR docs to make your own
+resp<-registerTwitterOAuth(tw_creds)
+
+# Assign Search Keyword
+search_term <- "#user2014"
+
+# API Call
+bp <- suppressWarnings(searchTwitter(search_term, lang = "en",n = 2000, ))
+
+# Analyses ----
+
+# Function to sanitize text 
+sanitize.text <- function(x) {
+  stopifnot(is.character(x))
+  sanitize.each.element <- function(elem) {
+    ifelse(Encoding(elem) == "unknown", elem, iconv(elem, from = as.character(Encoding(elem)), 
+                                                    to = "latin1", sub = ""))
+    }
+  x <- sapply(x, sanitize.each.element)
+  names(x) <- NULL
+  x
+  }
+
+# Get Device Types
+sources <- sapply(bp, function(x) x$getStatusSource())
+sources <- gsub("^>?|</a>$", "", sanitize.text(sources) ) # Needs improvement
+sources <- strsplit(sources, ">")
+sources <- sapply(sources, function(x) ifelse(length(x) > 1, x[2], x[1]))
+
+```
+
+#### Top **Twitter Clients**
+(People mostly tweeted on their laptop browsers, or their iPhone or Android Mobile Apps)
+
+```{r, echo=FALSE, message=FALSE}
+# Most Used Devices
+sources_top <- setNames(as.data.frame(head( sort(table(sources), decreasing = T)
+                                            , 10) ), "Tweets")
+
+sources_f<-gsub("TWITTER( for)?","",sources, ignore.case = T)
+sources_f<-gsub("client","",sources_f, ignore.case = T)
+
+
+library(wordcloud)
+wordcloud(sources_f, max.words = 20, scale = c(5,1), rot.per = 0, use.r.layout = T, random.order = F )
+```
+```{r, message=FALSE, echo=FALSE}
+library(plyr)
+
+# Now let's try some dplyr PIPES
+library(dplyr)
+
+# Create data table from twitter feed
+bpinf <- tbl_df(
+  setNames(
+    ldply(bp, function(x) {
+      data.frame(x$retweetCount, x$favoriteCount, x$screenName, x$isRetweet)
+      })
+    , c("RT", "FC", "handle", "isRT"))
+  )
+
+# Most Original Tweets ----
+twps <- bpinf %>% 
+  filter(isRT == F) # Remove retweets
+
+twps2 <- twps %>% 
+  group_by(handle) %>%
+  dplyr::summarise( count= length(FC) ) %>%  # Count Tweets
+  dplyr::arrange(-count) # Sort for output
+
+twps3 <- twps %>%
+  group_by(handle) %>%
+  dplyr::summarize( weight= sum( sum(as.numeric(FC)), sum(as.numeric(RT) )) ) %>%  # Count Tweets
+  dplyr::arrange(-weight) # Sort for output
+
+```
+
+------
+
+
+#### The **Most Prolific Tweeps** 
+(by original tweets authored)
+
+```{r, echo=FALSE, message=F}
+library(wordcloud)
+wordcloud(twps$handle, max.words = 50,  rot.per = 0, use.r.layout = T, random.order = F )
+```
+
+------
+
+#### **Top Influencers**
+(weighed by retweets+faves for tweets by author)
+
+```{r, echo=FALSE, message=F}
+library(wordcloud)
+wordcloud(twps3$handle, freq=twps3$weight ,max.words = 50,  rot.per = 0, use.r.layout = T, random.order = F )
+```
+```{r, message=FALSE, echo=FALSE}
+library(plyr)
+
+# Function to Sanitize Text
+sanitize.text <- function(x) {
+  stopifnot(is.character(x))
+  sanitize.each.element <- function(elem) {
+    ifelse(Encoding(elem) == "unknown", elem, iconv(elem, from = as.character(Encoding(elem)), 
+                                                    to = "latin1", sub = ""))
+    }
+  x <- sapply(x, sanitize.each.element)
+  names(x) <- NULL
+  x
+  }
+
+twitter_text <- sapply(bp, function(x) sanitize.text(x$text))
+
+# Trim
+twext <- tbl_df(data.frame(tw=twitter_text)) %>% 
+  filter(bpinf$isRT == F) %>% 
+#   filter(bpinf$isRT == T) %>% 
+  mutate(tw = gsub("(#|@)?user2014(_[a-z]*?)","", tw,ignore.case = T)) %>% 
+  mutate(tw = gsub("(#|@)?user([! ]?)(2014)?","", tw,ignore.case = T)) %>%
+  mutate(tw = gsub("(#|@|&)[a-z_0-9]*","", tw,ignore.case = T)) %>% 
+  mutate(tw = gsub("http(s?):.*$","", tw,ignore.case = T)) %>%
+  mutate(tw = gsub("^.*:","", tw,ignore.case = T)) 
+  
+#  
+library(wordcloud)
+library(openNLP)
+
+s <- as.String(paste(twext$tw))
+
+test<- (annotate(s, list(Maxent_Sent_Token_Annotator(),Maxent_Word_Token_Annotator(), Maxent_POS_Tag_Annotator() )) )
+
+# Too lazy to make this a function = ugly cut-paste job!
+wrd<- subset(test, type=="word")
+tags<-sapply(wrd$features, '[[',"POS")
+wrd<-wrd[grepl("^N",tags)]
+tags<-sapply(wrd$features, '[[',"POS")
+
+user_nouns<-sprintf("%s", s[wrd], tags)
+
+wrd<- subset(test, type=="word")
+tags<-sapply(wrd$features, '[[',"POS")
+wrd<-wrd[grepl("^V",tags)]
+tags<-sapply(wrd$features, '[[',"POS")
+
+user_verbs<-sprintf("%s", s[wrd], tags)
+
+wrd<- subset(test, type=="word")
+tags<-sapply(wrd$features, '[[',"POS")
+wrd<-wrd[grepl("^J",tags)]
+tags<-sapply(wrd$features, '[[',"POS")
+
+user_adj<-sprintf("%s", s[wrd], tags)
+
+wrd<- subset(test, type=="word")
+tags<-sapply(wrd$features, '[[',"POS")
+wrd<-wrd[grepl("^J",tags)]
+tags<-sapply(wrd$features, '[[',"POS")
+
+user_adj<-sprintf("%s", s[wrd], tags)
+```
+
+------
+
+#### Top **Attendee Verbs**
+(how appropriate for UseR! right?)
+
+```{r, echo=F, message=FALSE}
+library(wordcloud)
+wordcloud(user_verbs, max.words = 100, rot.per = 0, use.r.layout = T, random.order = F )
+```
+
+------
+
+#### **Top Things** Attendees Talked About
+Talk about talking about talk
+
+```{r, echo=F, message=FALSE}
+library(wordcloud)
+wordcloud(user_nouns, max.words = 100, rot.per = 0, use.r.layout = T, random.order = F)
+```
+
+------
+
+#### Top **TwAdjectives**
+(UseR! == Great many cool new awesome interactive open things available next!)
+
+```{r, echo=F, message=FALSE}
+library(wordcloud)
+wordcloud(user_adj, max.words = 100, rot.per = 0, use.r.layout = T, random.order = F )
+```
+
+------
+
+Made with: twitteR, dplyr, openNLP, wordcloud, knitr, RPubs + dependencies.
+
+
